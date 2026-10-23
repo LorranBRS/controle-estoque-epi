@@ -18,6 +18,7 @@
   <button data-aba="estoque">Estoque do mês</button>
   <button data-aba="movs">Movimentações</button>
   <button data-aba="itens">Cadastro de EPIs</button>
+  <button data-aba="listas">Configurações</button>
   <button data-aba="config">Planilhas e backup</button>
 </nav>
 <main>
@@ -36,21 +37,20 @@
           </div>
         </div>
         <label class="campo full">Descrição do EPI
-          <input id="f-item" list="lista-itens" placeholder="Digite para buscar (ex.: luva, botina 42, PFF2...)" autocomplete="off">
-          <datalist id="lista-itens"></datalist>
+          <input id="f-item" placeholder="Clique para escolher ou digite para buscar (ex.: luva, botina 42, PFF2...)" autocomplete="off">
         </label>
         <div class="full info" id="f-info">Selecione um EPI para ver o saldo.</div>
         <label class="campo">C.A <input id="f-ca" placeholder="Nº do C.A"></label>
         <label class="campo">Quantidade <input id="f-qtd" type="number" min="1" step="1" value="1"></label>
         <label class="campo"><span id="lbl-data">Data de saída</span> <input id="f-data" type="date"></label>
         <label class="campo"><span id="lbl-pessoa">Nome de quem retirou</span>
-          <input id="f-pessoa" list="lista-pessoas" autocomplete="off"><datalist id="lista-pessoas"></datalist>
+          <input id="f-pessoa" autocomplete="off" placeholder="Escolha da lista ou digite">
         </label>
         <label class="campo"><span id="lbl-destino">Para onde (destino)</span>
-          <input id="f-destino" list="lista-destinos" autocomplete="off" placeholder="Ex.: Obra, setor, SP..."><datalist id="lista-destinos"></datalist>
+          <input id="f-destino" autocomplete="off" placeholder="Escolha da lista ou digite">
         </label>
         <label class="campo">Responsável
-          <input id="f-resp" list="lista-resp" autocomplete="off"><datalist id="lista-resp"></datalist>
+          <input id="f-resp" autocomplete="off" placeholder="Escolha da lista ou digite">
         </label>
         <label class="campo full">Observação <input id="f-obs" placeholder="Opcional"></label>
         <label class="full sub" id="lin-ca" style="display:none"><input type="checkbox" id="f-atualiza-ca" style="width:auto"> Atualizar o C.A cadastrado deste EPI para o novo número</label>
@@ -112,6 +112,29 @@
       <div class="barra"><h2 style="margin:0;flex:1">EPIs cadastrados</h2><input id="busca-item" placeholder="Filtrar..."></div>
       <div class="tabela"><table id="t-itens"></table></div>
     </div>
+  </section>
+
+  <!-- LISTAS / CONFIGURACOES -->
+  <section class="aba" id="aba-listas">
+    <div class="card">
+      <h2>Preenchimento rápido</h2>
+      <p class="sub">Cadastre aqui os nomes usados no dia a dia. Na hora do lançamento basta clicar no campo e escolher
+        da lista, mas você continua podendo <b>digitar qualquer nome manualmente</b>.</p>
+      <div class="grid">
+        <label class="campo">Responsável padrão (já vem preenchido)
+          <input id="c-resp-padrao" autocomplete="off" placeholder="Escolha da lista ou digite">
+        </label>
+        <label class="campo">Destino padrão das saídas (opcional)
+          <input id="c-dest-padrao" autocomplete="off" placeholder="Escolha da lista ou digite">
+        </label>
+        <label class="full sub"><input type="checkbox" id="c-auto" style="width:auto"> Quando eu digitar um nome novo no lançamento, adicionar automaticamente à lista</label>
+      </div>
+      <div class="acoes">
+        <button class="btn" id="btn-config">💾 Salvar configurações</button>
+        <button id="btn-importar-usados">Importar nomes já usados nos lançamentos</button>
+      </div>
+    </div>
+    <div class="listas-grid" id="listas"></div>
   </section>
 
   <!-- CONFIG -->

@@ -9,6 +9,9 @@ Sistema web para controle de estoque de EPI (Obra Fábrica do Samba – RJ). Rod
 - **Estoque do mês**: Qtd. estoque atualizado, Entrada total (verde), Saídas total (vermelho) e Saldo atual (azul).
 - **Movimentações**: lançamentos do mês, com busca e exclusão.
 - **Cadastro de EPIs**: incluir e editar EPIs, C.A e estoque inicial.
+- **Configurações**: listas de pessoas que retiram, responsáveis, destinos e fornecedores, além de responsável e
+  destino padrão. Nos lançamentos, os campos mostram a lista ao clicar, mas sempre aceitam um nome digitado à mão
+  (que pode ser adicionado à lista automaticamente).
 - **Planilhas e backup**: pasta das planilhas Excel e backup/restauração dos dados.
 
 ## Planilhas Excel

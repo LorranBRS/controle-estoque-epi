@@ -76,3 +76,23 @@ h2 { margin: 0 0 14px; font-size: 17px; }
   .tipo { flex-direction: column; }
   .btn.grande { width: 100%; }
 }
+
+/* caixa de escolha: lista ao clicar + digitacao livre */
+.combo { position: relative; width: 100%; }
+.combo input { padding-right: 38px; }
+.combo .seta { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 36px; border: 0; background: transparent; color: var(--sub); padding: 0; font-size: 13px; }
+.combo-lista { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 2px); max-height: 260px; overflow-y: auto; margin: 0; padding: 4px 0;
+  list-style: none; background: #fff; border: 1px solid var(--borda); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 30, 50, .15); display: none; }
+.combo-lista.aberta { display: block; }
+.combo-lista li { padding: 8px 12px; cursor: pointer; font-weight: 400; color: var(--txt); font-size: 14px; }
+.combo-lista li.ativo, .combo-lista li:hover { background: #eef3f9; }
+.combo-lista li.vazio { color: var(--sub); cursor: default; background: none; }
+.combo-lista li.novo { color: var(--pri2); }
+
+.listas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.listas-grid .card { margin-bottom: 0; }
+.add-linha { display: flex; gap: 8px; margin-bottom: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: #eef3f9; border-radius: 14px; padding: 4px 4px 4px 12px; font-size: 14px; }
+.chip button { border: 0; background: none; color: var(--sub); padding: 0 6px; font-size: 16px; line-height: 1; }
+.chip button:hover { color: var(--err); }

@@ -14,12 +14,26 @@ let DB = null;
 let pastaHandle = null;
 
 // ------------------------------------------------------------ banco (localStorage)
+const LISTAS = {
+  pessoas: { titulo: "Pessoas que retiram EPI", dica: "Ex.: Edjanio, Reginaldo..." },
+  responsaveis: { titulo: "Responsáveis", dica: "Quem registra / autoriza" },
+  destinos: { titulo: "Destinos (para onde)", dica: "Ex.: Obra SP, Galpão 2..." },
+  fornecedores: { titulo: "Fornecedores (entradas)", dica: "Quem entrega / vende o EPI" }
+};
+
+function completarDB(db) {
+  db.listas = db.listas || {};
+  for (const k in LISTAS) db.listas[k] = db.listas[k] || [];
+  db.config = Object.assign({ auto_add: true, resp_padrao: "", dest_padrao: "" }, db.config || {});
+  return db;
+}
+
 function carregarDB() {
   try {
     const s = localStorage.getItem(CHAVE_DB);
-    if (s) return JSON.parse(s);
+    if (s) return completarDB(JSON.parse(s));
   } catch (e) { /* segue com os dados iniciais */ }
-  return { obra: "Fabrica do Samba - RJ", itens: JSON.parse(JSON.stringify(ITENS_INICIAIS)), movimentos: [], prox_mov: 1 };
+  return completarDB({ obra: "Fabrica do Samba - RJ", itens: JSON.parse(JSON.stringify(ITENS_INICIAIS)), movimentos: [], prox_mov: 1 });
 }
 
 function gravarDB() {
@@ -152,6 +166,158 @@ async function gerarExcel(mes, permitida) {
   mostrar(`✔ Salvo. Planilha do mês baixada: <b>${esc(nome)}</b>`);
 }
 
+// ------------------------------------------------------------ caixa de escolha (lista + digitacao livre)
+const normalizar = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function semRepetir(lista) {
+  const vistos = new Set(), saida = [];
+  for (const v of lista) {
+    const n = normalizar(v).trim();
+    if (n && !vistos.has(n)) { vistos.add(n); saida.push(v.trim()); }
+  }
+  return saida;
+}
+
+function combo(input, opcoes) {
+  const caixa = document.createElement("div");
+  caixa.className = "combo";
+  input.parentNode.insertBefore(caixa, input);
+  caixa.appendChild(input);
+  const seta = document.createElement("button");
+  seta.type = "button";
+  seta.className = "seta";
+  seta.tabIndex = -1;
+  seta.textContent = "▼";
+  seta.title = "Mostrar lista";
+  const ul = document.createElement("ul");
+  ul.className = "combo-lista";
+  caixa.append(seta, ul);
+  let ativo = -1, itens = [];
+
+  function abrir(tudo) {
+    const f = tudo ? "" : normalizar(input.value);
+    itens = opcoes().filter(o => normalizar(o).includes(f)).slice(0, 200);
+    ativo = -1;
+    ul.innerHTML = itens.length ? itens.map((o, i) => `<li data-i="${i}">${esc(o)}</li>`).join("")
+      : `<li class="vazio">${input.value.trim() ? "Nome novo: será usado como foi digitado" : "Lista vazia: cadastre em Configurações ou digite"}</li>`;
+    ul.classList.add("aberta");
+  }
+  const fechar = () => ul.classList.remove("aberta");
+  function escolher(i) {
+    input.value = itens[i];
+    fechar();
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new Event("change"));
+  }
+  function marcar(i) {
+    const lis = ul.querySelectorAll("li[data-i]");
+    if (!lis.length) return;
+    ativo = (i + lis.length) % lis.length;
+    lis.forEach((li, j) => li.classList.toggle("ativo", j === ativo));
+    lis[ativo].scrollIntoView({ block: "nearest" });
+  }
+
+  input.addEventListener("focus", () => abrir(true));
+  input.addEventListener("click", () => { if (!ul.classList.contains("aberta")) abrir(true); });
+  input.addEventListener("input", e => { if (e.isTrusted) abrir(false); });
+  input.addEventListener("blur", () => setTimeout(fechar, 150));
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!ul.classList.contains("aberta")) abrir(true); marcar(ativo + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); marcar(ativo - 1); }
+    else if (e.key === "Enter" && !e.ctrlKey && ul.classList.contains("aberta") && ativo >= 0) { e.preventDefault(); escolher(ativo); }
+    else if (e.key === "Escape" || e.key === "Tab") fechar();
+  });
+  ul.addEventListener("mousedown", e => {
+    e.preventDefault();
+    const li = e.target.closest("li[data-i]");
+    if (li) escolher(+li.dataset.i);
+  });
+  seta.addEventListener("mousedown", e => {
+    e.preventDefault();
+    if (ul.classList.contains("aberta")) fechar(); else { input.focus(); abrir(true); }
+  });
+}
+
+// valores ja usados nos lancamentos, para completar as listas
+const usados = (campo, tipo) => DB.movimentos.filter(m => !tipo || m.tipo === tipo).map(m => m[campo]).filter(Boolean);
+
+function opcoesPessoa() {
+  return tipoAtual() === "Entrada"
+    ? semRepetir([...DB.listas.fornecedores, ...usados("pessoa", "Entrada")])
+    : semRepetir([...DB.listas.pessoas, ...usados("pessoa", "Saída")]);
+}
+function opcoesDestino() {
+  return tipoAtual() === "Entrada"
+    ? semRepetir(usados("destino", "Entrada"))
+    : semRepetir([...DB.listas.destinos, ...usados("destino", "Saída")]);
+}
+const opcoesResp = () => semRepetir([...DB.listas.responsaveis, ...usados("responsavel")]);
+
+function adicionarNaLista(lista, valor) {
+  valor = (valor || "").trim().replace(/\s+/g, " ");
+  if (!valor || DB.listas[lista].some(v => normalizar(v) === normalizar(valor))) return false;
+  DB.listas[lista].push(valor);
+  DB.listas[lista].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  return true;
+}
+
+// ------------------------------------------------------------ aba Configuracoes
+function desenharListas() {
+  $("c-resp-padrao").value = DB.config.resp_padrao;
+  $("c-dest-padrao").value = DB.config.dest_padrao;
+  $("c-auto").checked = DB.config.auto_add;
+  $("listas").innerHTML = Object.entries(LISTAS).map(([k, l]) => `
+    <div class="card">
+      <h2>${l.titulo} <span class="sub">(${DB.listas[k].length})</span></h2>
+      <div class="add-linha">
+        <input id="add-${k}" placeholder="${esc(l.dica)}" onkeydown="if(event.key==='Enter')incluirNome('${k}')">
+        <button class="btn" onclick="incluirNome('${k}')">Adicionar</button>
+      </div>
+      <div class="chips">${DB.listas[k].map((v, i) => `<span class="chip">${esc(v)}<button title="Remover" onclick="removerNome('${k}', ${i})">×</button></span>`).join("")
+        || '<span class="sub">Nenhum nome cadastrado.</span>'}</div>
+    </div>`).join("");
+}
+
+function incluirNome(lista) {
+  const campo = $("add-" + lista), partes = campo.value.split(/[;\n]/);
+  let n = 0;
+  partes.forEach(p => { if (adicionarNaLista(lista, p)) n++; });
+  if (!n && campo.value.trim()) return mostrar("Esse nome já está na lista.", "err");
+  gravarDB();
+  desenharListas();
+  $("add-" + lista).focus();
+}
+
+function removerNome(lista, i) {
+  if (!confirm(`Remover "${DB.listas[lista][i]}" da lista? Os lançamentos já feitos não mudam.`)) return;
+  DB.listas[lista].splice(i, 1);
+  gravarDB();
+  desenharListas();
+}
+
+function salvarConfig() {
+  DB.config.resp_padrao = $("c-resp-padrao").value.trim();
+  DB.config.dest_padrao = $("c-dest-padrao").value.trim();
+  DB.config.auto_add = $("c-auto").checked;
+  adicionarNaLista("responsaveis", DB.config.resp_padrao);
+  adicionarNaLista("destinos", DB.config.dest_padrao);
+  gravarDB();
+  desenharListas();
+  limpar();
+  mostrar("✔ Configurações salvas.");
+}
+
+function importarUsados() {
+  let n = 0;
+  usados("pessoa", "Saída").forEach(v => adicionarNaLista("pessoas", v) && n++);
+  usados("pessoa", "Entrada").forEach(v => adicionarNaLista("fornecedores", v) && n++);
+  usados("destino", "Saída").forEach(v => adicionarNaLista("destinos", v) && n++);
+  usados("responsavel").forEach(v => adicionarNaLista("responsaveis", v) && n++);
+  gravarDB();
+  desenharListas();
+  mostrar(n ? `✔ ${n} nome(s) importado(s) dos lançamentos.` : "Nenhum nome novo para importar.");
+}
+
 // ------------------------------------------------------------ telas
 function mostrar(txt, tipo = "ok") {
   const m = $("msg");
@@ -164,12 +330,7 @@ function mostrar(txt, tipo = "ok") {
 
 function atualizarTela() {
   $("obra").textContent = "Obra: " + DB.obra;
-  $("lista-itens").innerHTML = DB.itens.map(it => `<option value="${esc(rotulo(it))}">`).join("");
-  const uniq = k => [...new Set(DB.movimentos.map(m => m[k]).filter(Boolean))].sort();
-  $("lista-pessoas").innerHTML = uniq("pessoa").map(v => `<option value="${esc(v)}">`).join("");
-  $("lista-destinos").innerHTML = uniq("destino").map(v => `<option value="${esc(v)}">`).join("");
-  $("lista-resp").innerHTML = uniq("responsavel").map(v => `<option value="${esc(v)}">`).join("");
-  desenharUltimos(); desenharEstoque(); desenharMovs(); desenharItens(); infoItem();
+  desenharUltimos(); desenharEstoque(); desenharMovs(); desenharItens(); desenharListas(); infoItem();
 }
 
 function itemSelecionado() {
@@ -201,6 +362,9 @@ function ajustarTipo() {
   $("lbl-data").textContent = t === "Entrada" ? "Data de entrada" : "Data de saída";
   $("lbl-pessoa").textContent = t === "Entrada" ? "Fornecedor / quem entregou" : "Nome de quem retirou";
   $("lbl-destino").textContent = t === "Entrada" ? "Origem / Nota fiscal" : "Para onde (destino)";
+  const dp = DB && DB.config.dest_padrao;
+  if (dp && t === "Entrada" && $("f-destino").value === dp) $("f-destino").value = "";
+  if (dp && t === "Saída" && !$("f-destino").value) $("f-destino").value = dp;
   infoItem();
 }
 
@@ -224,6 +388,12 @@ async function salvarMov() {
     responsavel: $("f-resp").value.trim(), obs: $("f-obs").value.trim(),
     registrado_em: new Date().toISOString()
   });
+  if (DB.config.auto_add) {
+    const m = DB.movimentos[DB.movimentos.length - 1];
+    adicionarNaLista(tipo === "Entrada" ? "fornecedores" : "pessoas", m.pessoa);
+    if (tipo === "Saída") adicionarNaLista("destinos", m.destino);
+    adicionarNaLista("responsaveis", m.responsavel);
+  }
   gravarDB();
   lembrar("responsavel", $("f-resp").value.trim());
   $("mes").value = data.slice(0, 7);
@@ -237,7 +407,8 @@ function limpar() {
   ["f-item", "f-ca", "f-pessoa", "f-destino", "f-obs"].forEach(i => $(i).value = "");
   $("f-qtd").value = 1;
   $("f-data").value = hoje();
-  $("f-resp").value = lembrado("responsavel");
+  $("f-resp").value = (DB && DB.config.resp_padrao) || lembrado("responsavel");
+  if (DB && DB.config.dest_padrao && tipoAtual() === "Saída") $("f-destino").value = DB.config.dest_padrao;
   $("f-atualiza-ca").checked = false;
   infoItem();
 }
@@ -344,7 +515,7 @@ async function restaurarBackup(arquivo) {
     if (!Array.isArray(d.itens) || !Array.isArray(d.movimentos)) throw new Error("arquivo inválido");
     if (!confirm(`Substituir os dados atuais por este backup (${d.itens.length} EPIs, ${d.movimentos.length} lançamentos)?`)) return;
     d.prox_mov = d.prox_mov || Math.max(0, ...d.movimentos.map(m => m.id)) + 1;
-    DB = d;
+    DB = completarDB(d);
     gravarDB();
     atualizarTela();
     mostrar("✔ Backup restaurado.");
@@ -377,6 +548,14 @@ $("btn-backup").onclick = baixarBackup;
 $("btn-restaurar").onclick = () => $("arq-restaurar").click();
 $("arq-restaurar").onchange = e => { if (e.target.files[0]) restaurarBackup(e.target.files[0]); e.target.value = ""; };
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.ctrlKey) salvarMov(); });
+$("btn-config").onclick = salvarConfig;
+$("btn-importar-usados").onclick = importarUsados;
+combo($("f-item"), () => DB.itens.map(rotulo));
+combo($("f-pessoa"), opcoesPessoa);
+combo($("f-destino"), opcoesDestino);
+combo($("f-resp"), opcoesResp);
+combo($("c-resp-padrao"), () => DB.listas.responsaveis);
+combo($("c-dest-padrao"), () => DB.listas.destinos);
 
 (async () => {
   DB = carregarDB();
