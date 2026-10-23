@@ -52,6 +52,20 @@
         <label class="campo">Responsável
           <input id="f-resp" autocomplete="off" placeholder="Escolha da lista ou digite">
         </label>
+        <div class="full bloco-nf" id="bloco-nf">
+          <div class="grid">
+            <label class="campo">Nº da Nota Fiscal <input id="f-nf-num" placeholder="Ex.: 001234" autocomplete="off"></label>
+            <div class="campo" style="grid-column: span 2">Anexar nota fiscal de compra (PDF ou foto)
+              <div class="anexo-linha">
+                <label class="btn-anexo" for="f-nf-arq">📎 Escolher arquivo</label>
+                <input type="file" id="f-nf-arq" accept="application/pdf,image/*" hidden>
+                <span id="f-nf-nome" class="sub">Nenhum arquivo anexado.</span>
+                <button type="button" class="link" id="f-nf-remover" style="display:none">Remover</button>
+              </div>
+            </div>
+          </div>
+          <img id="f-nf-previa" class="nf-previa" alt="Prévia da nota fiscal" hidden>
+        </div>
         <label class="campo full">Observação <input id="f-obs" placeholder="Opcional"></label>
         <label class="full sub" id="lin-ca" style="display:none"><input type="checkbox" id="f-atualiza-ca" style="width:auto"> Atualizar o C.A cadastrado deste EPI para o novo número</label>
       </div>
@@ -89,6 +103,7 @@
         <input id="busca-mov" placeholder="Filtrar por EPI, pessoa, destino...">
       </div>
       <div class="tabela"><table id="t-movs"></table></div>
+      <input type="file" id="arq-nf-depois" accept="application/pdf,image/*" hidden>
     </div>
   </section>
 
@@ -150,6 +165,34 @@
       </div>
     </div>
     <div class="card">
+      <h2>Google Drive</h2>
+      <p class="sub">Conectando sua conta Google, a cada salvamento o sistema atualiza no Drive os mesmos arquivos
+        (<b>Controle_EPI_&lt;Mês&gt;.xlsx</b> e <b>CONTROLE_ESTOQUE_EPI.xlsx</b>) na pasta <b>Controle de Estoque EPI</b>,
+        e envia as notas fiscais para a subpasta <b>Notas Fiscais</b>. Funciona em qualquer navegador, inclusive no celular.</p>
+      <div class="info" id="d-status"></div>
+      <div class="grid" style="margin-top:14px" id="d-client-linha">
+        <label class="campo full">ID do cliente do Google (OAuth)
+          <input id="d-client" placeholder="000000000000-xxxxxxxx.apps.googleusercontent.com" autocomplete="off">
+        </label>
+      </div>
+      <div class="acoes">
+        <button class="btn" id="d-conectar">🔗 Conectar ao Google Drive</button>
+        <button id="d-desconectar" style="display:none">Desconectar</button>
+      </div>
+      <details class="passos">
+        <summary>Como obter o ID do cliente (configuração única, ~5 minutos)</summary>
+        <ol>
+          <li>Acesse <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> com sua conta Google e crie um projeto (ex.: "Controle EPI").</li>
+          <li>Em <b>APIs e serviços → Biblioteca</b>, procure <b>Google Drive API</b> e clique em <b>Ativar</b>.</li>
+          <li>Em <b>APIs e serviços → Tela de permissão OAuth</b> (Google Auth Platform), escolha <b>Externo</b>, preencha o nome do app e seu e-mail.
+            Em <b>Público-alvo / Usuários de teste</b>, adicione o(s) e-mail(s) que vão usar o sistema.</li>
+          <li>Em <b>Credenciais → Criar credenciais → ID do cliente OAuth</b>, tipo <b>Aplicativo da Web</b>.
+            Em <b>Origens JavaScript autorizadas</b>, adicione <code>https://lorranbrs.github.io</code>.</li>
+          <li>Copie o <b>ID do cliente</b> (termina em <code>.apps.googleusercontent.com</code>), cole acima e clique em <b>Conectar</b>.</li>
+        </ol>
+      </details>
+    </div>
+    <div class="card">
       <h2>Backup dos dados</h2>
       <p class="sub">Os lançamentos ficam guardados neste navegador, neste computador. Faça backup com frequência e use
         "Restaurar" para levar os dados para outro computador. Limpar os dados do navegador apaga os lançamentos.</p>
@@ -165,6 +208,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="dados_iniciais.js"></script>
 <script src="logo.js"></script>
+<script src="anexos.js"></script>
+<script src="drive.js"></script>
 <script src="excel.js"></script>
 <script src="app.js"></script>
 </body>

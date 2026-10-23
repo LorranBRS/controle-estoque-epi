@@ -96,3 +96,16 @@ h2 { margin: 0 0 14px; font-size: 17px; }
 .chip { display: inline-flex; align-items: center; gap: 4px; background: #eef3f9; border-radius: 14px; padding: 4px 4px 4px 12px; font-size: 14px; }
 .chip button { border: 0; background: none; color: var(--sub); padding: 0 6px; font-size: 16px; line-height: 1; }
 .chip button:hover { color: var(--err); }
+
+/* nota fiscal */
+.bloco-nf { border: 1px dashed var(--ok); background: #f4fbf6; border-radius: 8px; padding: 14px; }
+.anexo-linha { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-weight: 400; }
+.btn-anexo { display: inline-block; padding: 9px 16px; border-radius: 7px; background: #fff; border: 1px solid var(--ok); color: var(--ok); font-weight: 600; cursor: pointer; }
+.btn-anexo:hover { background: var(--okbg); }
+.nf-previa[hidden] { display: none; }
+.nf-previa { display: block; margin-top: 12px; max-width: 260px; max-height: 260px; border: 1px solid var(--borda); border-radius: 6px; }
+.clipe { background: none; border: 0; color: var(--pri2); padding: 2px 4px; white-space: nowrap; }
+.passos { margin-top: 14px; font-size: 14px; }
+.passos summary { cursor: pointer; color: var(--pri2); font-weight: 600; }
+.passos li { margin: 6px 0; }
+.passos code { background: #eef3f9; padding: 1px 5px; border-radius: 4px; }

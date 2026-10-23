@@ -12,6 +12,7 @@ const rotulo = it => `${it.id} - ${it.descricao}`;
 
 let DB = null;
 let pastaHandle = null;
+let anexoPendente = null;  // nota fiscal escolhida no formulario, ainda nao salva
 
 // ------------------------------------------------------------ banco (localStorage)
 const LISTAS = {
@@ -68,25 +69,14 @@ function saldoAtual(db, id) {
 // ------------------------------------------------------------ pasta (File System Access API)
 const temPasta = "showDirectoryPicker" in window;
 
-function idb(acao, valor) {
-  return new Promise((ok, falha) => {
-    const req = indexedDB.open("controle_epi", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("cfg");
-    req.onerror = () => falha(req.error);
-    req.onsuccess = () => {
-      const tx = req.result.transaction("cfg", acao === "ler" ? "readonly" : "readwrite");
-      const st = tx.objectStore("cfg");
-      const r = acao === "ler" ? st.get("pasta") : st.put(valor, "pasta");
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => falha(r.error);
-    };
-  });
-}
+const idb = (acao, valor) => acao === "ler" ? idbLer("cfg", "pasta") : idbGravar("cfg", "pasta", valor);
 
 async function escolherPasta() {
   try {
     pastaHandle = await window.showDirectoryPicker({ id: "controle-epi", mode: "readwrite" });
     await idb("gravar", pastaHandle);
+    DB.movimentos.forEach(m => { if (m.nf) delete m.nf.arquivo_local; });  // regrava as NFs na pasta nova
+    gravarDB();
     mostrarAvisoPasta();
     await gerarExcel($("mes").value);
   } catch (e) {
@@ -107,6 +97,11 @@ function mostrarAvisoPasta() {
     a.className = "aviso-pasta ok";
     a.innerHTML = `<span>📁 Planilhas sendo salvas na pasta <b>${esc(pastaHandle.name)}</b>.</span>`;
     $("pasta-atual").textContent = "Pasta atual: " + pastaHandle.name;
+  } else if (driveAtivo()) {
+    a.className = "aviso-pasta ok";
+    a.innerHTML = `<span>☁ Planilhas sendo atualizadas no <b>Google Drive</b>.</span>` +
+      (temPasta ? `<button onclick="escolherPasta()">📁 Salvar também numa pasta do computador</button>` : "");
+    $("pasta-atual").textContent = temPasta ? "Nenhuma pasta escolhida." : "Indisponível neste navegador.";
   } else if (temPasta) {
     a.className = "aviso-pasta";
     a.innerHTML = `<span>Escolha a pasta onde as planilhas Excel serão salvas e atualizadas.</span><button class="btn" onclick="escolherPasta()">📁 Escolher pasta</button>`;
@@ -139,31 +134,84 @@ function baixar(nome, blob) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
-// Atualiza a planilha do mes (um arquivo por mes) e a planilha principal
-async function gerarExcel(mes, permitida) {
+// Chamado no clique (o navegador exige um clique para pedir permissao da pasta e abrir o login do Google)
+let erroLoginDrive = null;
+async function prepararSalvamento() {
+  erroLoginDrive = null;
+  if (driveAtivo() && !tokenValido()) {
+    try { await obterTokenDrive(false); } catch (e) { erroLoginDrive = e; }
+  }
+  return pastaHandle ? await permissaoPasta() : false;
+}
+
+// Grava as notas fiscais ainda nao salvas na subpasta Notas_Fiscais da pasta escolhida
+async function salvarNotasLocais() {
+  const pendentes = DB.movimentos.filter(m => m.nf && !m.nf.arquivo_local);
+  if (!pendentes.length) return;
+  const dir = await pastaHandle.getDirectoryHandle("Notas_Fiscais", { create: true });
+  for (const m of pendentes) {
+    const anexo = await idbLer("anexos", m.id);
+    if (!anexo) continue;
+    const nome = nomeArquivoNF(m, anexo);
+    const w = await (await dir.getFileHandle(nome, { create: true })).createWritable();
+    await w.write(anexo.dados);
+    await w.close();
+    m.nf.arquivo_local = nome;
+  }
+  gravarDB();
+}
+
+async function previasDoMes(mes) {
+  const saida = {};
+  for (const m of DB.movimentos.filter(x => x.nf && x.data.slice(0, 7) === mes)) {
+    const a = await idbLer("anexos", m.id);
+    if (a && a.previa) saida[m.id] = { previa: await a.previa.arrayBuffer(), largura: a.largura, altura: a.altura };
+  }
+  return saida;
+}
+
+// Atualiza a planilha do mes (um arquivo por mes) e a planilha principal: na pasta, no Drive ou baixando
+async function gerarExcel(mes, permitida, avisarDrive) {
   const nome = `Controle_EPI_${nomeMesArq(mes)}.xlsx`;
+  const msgs = [], erros = [];
+  const usarPasta = pastaHandle && (permitida ?? await permissaoPasta());
+  const usarDrive = driveAtivo() && tokenValido();
+  if (driveAtivo() && !usarDrive) erros.push(`Google Drive não atualizado (${esc((erroLoginDrive || {}).message || "faça login")}). Clique em "Sincronizar agora" na aba Planilhas e backup.`);
+
+  if (usarPasta) { try { await salvarNotasLocais(); } catch (e) { erros.push("Não foi possível gravar as notas fiscais na pasta: " + esc(e.message)); } }
+  if (usarDrive) { try { await enviarNotasDrive(); } catch (e) { erros.push("Notas fiscais não enviadas ao Drive: " + esc(e.message)); } }
+
   let blob;
   try {
-    blob = await montarPlanilha(DB, mes);
+    blob = await montarPlanilha(DB, mes, await previasDoMes(mes));
   } catch (e) {
     return mostrar(`✔ Lançamento salvo no sistema.<br>⚠ Não foi possível gerar o Excel (${esc(e.message)}). Verifique a internet e clique em "Gerar Excel agora".`, "err");
   }
-  if (pastaHandle && (permitida ?? await permissaoPasta())) {
+  const arquivos = [[nome, blob], ["CONTROLE_ESTOQUE_EPI.xlsx", blob]];
+
+  if (usarPasta) {
     const falhas = [];
     let nova = false;
-    for (const [arq, ehMensal] of [[nome, true], ["CONTROLE_ESTOQUE_EPI.xlsx", false]]) {
-      try { const n = await gravarArquivo(arq, blob); if (ehMensal) nova = n; }
+    for (const [arq, b] of arquivos) {
+      try { const n = await gravarArquivo(arq, b); if (arq === nome) nova = n; }
       catch (e) { falhas.push(arq); }
     }
-    if (falhas.length) {
-      mostrar(`✔ Lançamento salvo no sistema.<br>⚠ Não foi possível atualizar ${falhas.join(" e ")}. Se estiver aberto no Excel, feche e clique em "Gerar Excel agora".`, "err");
-    } else {
-      mostrar(`✔ Salvo. Planilha do mês ${nova ? "criada" : "atualizada"}: <b>${esc(nome)}</b>`);
-    }
-    return;
+    if (falhas.length) erros.push(`Não foi possível atualizar ${falhas.join(" e ")}. Se estiver aberto no Excel, feche e clique em "Gerar Excel agora".`);
+    else msgs.push(`Planilha do mês ${nova ? "criada" : "atualizada"}: <b>${esc(nome)}</b>`);
   }
-  baixar(nome, blob);
-  mostrar(`✔ Salvo. Planilha do mês baixada: <b>${esc(nome)}</b>`);
+  if (usarDrive) {
+    try {
+      await enviarPlanilhasDrive(arquivos);
+      msgs.push("Google Drive atualizado");
+    } catch (e) { erros.push("Google Drive não atualizado: " + esc(e.message)); }
+  }
+  if (!usarPasta && !usarDrive) {
+    baixar(nome, blob);
+    msgs.push(`Planilha do mês baixada: <b>${esc(nome)}</b>`);
+  }
+  if (erros.length) mostrar(`✔ Lançamento salvo no sistema.${msgs.length ? " " + msgs.join(" • ") : ""}<br>⚠ ${erros.join("<br>⚠ ")}`, "err");
+  else mostrar("✔ Salvo. " + msgs.join(" • "));
+  if (avisarDrive) desenharDrive();
 }
 
 // ------------------------------------------------------------ caixa de escolha (lista + digitacao livre)
@@ -361,7 +409,8 @@ function ajustarTipo() {
   document.querySelectorAll(".tipo label").forEach(l => l.classList.toggle("sel", l.querySelector("input").checked));
   $("lbl-data").textContent = t === "Entrada" ? "Data de entrada" : "Data de saída";
   $("lbl-pessoa").textContent = t === "Entrada" ? "Fornecedor / quem entregou" : "Nome de quem retirou";
-  $("lbl-destino").textContent = t === "Entrada" ? "Origem / Nota fiscal" : "Para onde (destino)";
+  $("lbl-destino").textContent = t === "Entrada" ? "Origem" : "Para onde (destino)";
+  $("bloco-nf").style.display = t === "Entrada" ? "" : "none";
   const dp = DB && DB.config.dest_padrao;
   if (dp && t === "Entrada" && $("f-destino").value === dp) $("f-destino").value = "";
   if (dp && t === "Saída" && !$("f-destino").value) $("f-destino").value = dp;
@@ -378,16 +427,28 @@ async function salvarMov() {
   if (tipo === "Saída" && saldo - qtd < 0 &&
       !confirm(`O saldo de "${it.descricao}" é ${saldo}. Salvar mesmo assim (ficará negativo)?`)) return;
   // pede a permissao da pasta logo no clique (o navegador exige um clique do usuario)
-  const permitida = pastaHandle ? await permissaoPasta() : false;
+  const permitida = await prepararSalvamento();
   const data = $("f-data").value || hoje();
   const ca = $("f-ca").value.trim() || it.ca || "";
   if ($("f-atualiza-ca").checked && ca) it.ca = ca;
-  DB.movimentos.push({
+  const mov = {
     id: DB.prox_mov++, tipo, item_id: it.id, quantidade: qtd, data, ca,
     pessoa: $("f-pessoa").value.trim(), destino: $("f-destino").value.trim(),
     responsavel: $("f-resp").value.trim(), obs: $("f-obs").value.trim(),
     registrado_em: new Date().toISOString()
-  });
+  };
+  if (tipo === "Entrada") {
+    mov.nf_numero = $("f-nf-num").value.trim();
+    if (anexoPendente) {
+      try {
+        await idbGravar("anexos", mov.id, anexoPendente);
+        mov.nf = { nome: anexoPendente.nome, tipo: anexoPendente.tipo, tamanho: anexoPendente.tamanho };
+      } catch (e) {
+        mostrar("Não foi possível guardar a nota fiscal: " + esc(e.message), "err");
+      }
+    }
+  }
+  DB.movimentos.push(mov);
   if (DB.config.auto_add) {
     const m = DB.movimentos[DB.movimentos.length - 1];
     adicionarNaLista(tipo === "Entrada" ? "fornecedores" : "pessoas", m.pessoa);
@@ -410,16 +471,70 @@ function limpar() {
   $("f-resp").value = (DB && DB.config.resp_padrao) || lembrado("responsavel");
   if (DB && DB.config.dest_padrao && tipoAtual() === "Saída") $("f-destino").value = DB.config.dest_padrao;
   $("f-atualiza-ca").checked = false;
+  $("f-nf-num").value = "";
+  definirAnexo(null);
   infoItem();
+}
+
+// ------------------------------------------------------------ nota fiscal no formulario
+function definirAnexo(anexo) {
+  anexoPendente = anexo;
+  const img = $("f-nf-previa");
+  if (img.src) URL.revokeObjectURL(img.src);
+  $("f-nf-nome").textContent = anexo ? `${anexo.nome} (${(anexo.tamanho / 1024 / 1024).toFixed(2)} MB${anexo.paginas > 1 ? ", " + anexo.paginas + " páginas" : ""})` : "Nenhum arquivo anexado.";
+  $("f-nf-remover").style.display = anexo ? "" : "none";
+  if (anexo && anexo.previa) { img.src = URL.createObjectURL(anexo.previa); img.hidden = false; }
+  else { img.removeAttribute("src"); img.hidden = true; }
+}
+
+async function lerArquivoNF(arquivo) {
+  $("f-nf-nome").textContent = "Lendo arquivo...";
+  try { return await prepararAnexo(arquivo); }
+  catch (e) { mostrar("Anexo inválido: " + esc(e.message), "err"); return null; }
+}
+
+async function verAnexo(id) {
+  const a = await idbLer("anexos", id);
+  const m = DB.movimentos.find(x => x.id === id);
+  if (a) return abrirAnexo(a);
+  if (m && m.nf && m.nf.drive_link) return window.open(m.nf.drive_link, "_blank");
+  mostrar("O arquivo desta nota fiscal não está neste computador.", "err");
+}
+
+let movAnexarDepois = null;
+function anexarDepois(id) {
+  movAnexarDepois = id;
+  $("arq-nf-depois").click();
+}
+
+async function anexarNoMovimento(arquivo) {
+  const m = DB.movimentos.find(x => x.id === movAnexarDepois);
+  if (!m) return;
+  const permitida = await prepararSalvamento();
+  const a = await lerArquivoNF(arquivo);
+  definirAnexo(null);
+  if (!a) return;
+  await idbGravar("anexos", m.id, a);
+  m.nf = { nome: a.nome, tipo: a.tipo, tamanho: a.tamanho };
+  if (!m.nf_numero) m.nf_numero = (prompt("Nº da nota fiscal (opcional):", "") || "").trim();
+  gravarDB();
+  atualizarTela();
+  await gerarExcel(m.data.slice(0, 7), permitida);
 }
 
 function linhaMov(m, excluir) {
   const it = itemPorId(DB, m.item_id) || { descricao: "?" };
   return `<tr><td>${br(m.data)}</td><td><span class="tag ${m.tipo}">${m.tipo}</span></td><td>${esc(it.descricao)}</td>
     <td>${esc(m.ca)}</td><td class="n"><b>${m.quantidade}</b></td><td>${esc(m.pessoa)}</td><td>${esc(m.destino)}</td>
-    <td>${esc(m.responsavel)}</td><td>${esc(m.obs)}</td>${excluir ? `<td><button class="link" onclick="excluir(${m.id})">Excluir</button></td>` : ""}</tr>`;
+    <td>${esc(m.responsavel)}</td><td>${esc(m.obs)}</td><td>${celulaNFTela(m, excluir)}</td>${excluir ? `<td><button class="link" onclick="excluir(${m.id})">Excluir</button></td>` : ""}</tr>`;
 }
-const cabMov = ex => `<tr><th>Data</th><th>Tipo</th><th>Descrição do EPI</th><th>C.A</th><th>Qtd</th><th>Retirado por / Fornecedor</th><th>Destino / Origem</th><th>Responsável</th><th>Obs.</th>${ex ? "<th></th>" : ""}</tr>`;
+const cabMov = ex => `<tr><th>Data</th><th>Tipo</th><th>Descrição do EPI</th><th>C.A</th><th>Qtd</th><th>Retirado por / Fornecedor</th><th>Destino / Origem</th><th>Responsável</th><th>Obs.</th><th>Nota fiscal</th>${ex ? "<th></th>" : ""}</tr>`;
+
+function celulaNFTela(m, comAcoes) {
+  if (m.nf) return `<button class="clipe" onclick="verAnexo(${m.id})" title="${esc(m.nf.nome)}">📎 ${esc(m.nf_numero || "Ver NF")}</button>`;
+  if (m.tipo !== "Entrada") return "";
+  return esc(m.nf_numero || "") + (comAcoes ? ` <button class="editar" onclick="anexarDepois(${m.id})">Anexar NF</button>` : "");
+}
 const ordenar = l => [...l].sort((a, b) => b.data.localeCompare(a.data) || b.id - a.id);
 
 function desenharUltimos() {
@@ -446,7 +561,7 @@ function desenharMovs() {
   $("tit-movs").textContent = "Movimentações – " + nomeMes(mes);
   const l = ordenar(DB.movimentos.filter(m => m.data.slice(0, 7) === mes)).filter(m => {
     const it = itemPorId(DB, m.item_id) || {};
-    return [it.descricao, m.pessoa, m.destino, m.responsavel, m.obs, m.ca, m.tipo].join(" ").toLowerCase().includes(f);
+    return [it.descricao, m.pessoa, m.destino, m.responsavel, m.obs, m.ca, m.tipo, m.nf_numero].join(" ").toLowerCase().includes(f);
   });
   $("t-movs").innerHTML = l.length ? cabMov(true) + l.map(m => linhaMov(m, true)).join("") : "<tr><td class='sub'>Nenhuma movimentação neste mês.</td></tr>";
 }
@@ -478,7 +593,7 @@ function limparItem() {
 async function salvarItem() {
   const desc = $("i-desc").value.trim().replace(/\s+/g, " ");
   if (!desc) return mostrar("Informe a descrição do EPI.", "err");
-  const permitida = pastaHandle ? await permissaoPasta() : false;
+  const permitida = await prepararSalvamento();
   const dados = { descricao: desc, ca: $("i-ca").value.trim(), estoque_base: Math.floor(+$("i-base").value || 0) };
   if ($("i-id").value) Object.assign(itemPorId(DB, +$("i-id").value), dados);
   else DB.itens.push({ id: Math.max(0, ...DB.itens.map(i => i.id)) + 1, ...dados });
@@ -490,8 +605,13 @@ async function salvarItem() {
 
 async function excluir(id) {
   if (!confirm("Excluir este lançamento? O estoque e a planilha serão recalculados.")) return;
-  const permitida = pastaHandle ? await permissaoPasta() : false;
-  DB.movimentos = DB.movimentos.filter(m => m.id !== id);
+  const permitida = await prepararSalvamento();
+  const m = DB.movimentos.find(x => x.id === id);
+  if (m && m.nf) {
+    try { await idbApagar("anexos", id); } catch (e) {}
+    await apagarNotaDrive(m);
+  }
+  DB.movimentos = DB.movimentos.filter(x => x.id !== id);
   gravarDB();
   atualizarTela();
   await gerarExcel($("mes").value, permitida);
@@ -505,18 +625,23 @@ async function alterarObra() {
   atualizarTela();
 }
 
-function baixarBackup() {
-  baixar(`backup_controle_epi_${hoje()}.json`, new Blob([JSON.stringify(DB, null, 1)], { type: "application/json" }));
+async function baixarBackup() {
+  let anexos = {};
+  try { anexos = await exportarAnexos(); } catch (e) { mostrar("Backup sem as notas fiscais: " + esc(e.message), "err"); }
+  baixar(`backup_controle_epi_${hoje()}.json`, new Blob([JSON.stringify({ ...DB, anexos })], { type: "application/json" }));
 }
 
 async function restaurarBackup(arquivo) {
   try {
     const d = JSON.parse(await arquivo.text());
     if (!Array.isArray(d.itens) || !Array.isArray(d.movimentos)) throw new Error("arquivo inválido");
-    if (!confirm(`Substituir os dados atuais por este backup (${d.itens.length} EPIs, ${d.movimentos.length} lançamentos)?`)) return;
+    if (!confirm(`Substituir os dados atuais por este backup (${d.itens.length} EPIs, ${d.movimentos.length} lançamentos, ${Object.keys(d.anexos || {}).length} notas fiscais)?`)) return;
     d.prox_mov = d.prox_mov || Math.max(0, ...d.movimentos.map(m => m.id)) + 1;
+    const anexos = d.anexos;
+    delete d.anexos;
     DB = completarDB(d);
     gravarDB();
+    if (anexos) await importarAnexos(anexos);
     atualizarTela();
     mostrar("✔ Backup restaurado.");
   } catch (e) {
@@ -542,13 +667,18 @@ $("btn-salvar").onclick = salvarMov;
 $("btn-limpar").onclick = limpar;
 $("btn-item").onclick = salvarItem;
 $("btn-item-cancelar").onclick = limparItem;
-$("btn-exportar").onclick = async () => gerarExcel($("mes").value, pastaHandle ? await permissaoPasta() : false);
+$("btn-exportar").onclick = async () => gerarExcel($("mes").value, await prepararSalvamento());
 $("btn-pasta").onclick = escolherPasta;
 $("btn-backup").onclick = baixarBackup;
 $("btn-restaurar").onclick = () => $("arq-restaurar").click();
 $("arq-restaurar").onchange = e => { if (e.target.files[0]) restaurarBackup(e.target.files[0]); e.target.value = ""; };
 document.addEventListener("keydown", e => { if (e.key === "Enter" && e.ctrlKey) salvarMov(); });
 $("btn-config").onclick = salvarConfig;
+$("f-nf-arq").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f) definirAnexo(await lerArquivoNF(f)); };
+$("f-nf-remover").onclick = () => definirAnexo(null);
+$("arq-nf-depois").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) anexarNoMovimento(f); };
+$("d-conectar").onclick = conectarDrive;
+$("d-desconectar").onclick = desconectarDrive;
 $("btn-importar-usados").onclick = importarUsados;
 combo($("f-item"), () => DB.itens.map(rotulo));
 combo($("f-pessoa"), opcoesPessoa);
@@ -567,5 +697,7 @@ combo($("c-dest-padrao"), () => DB.listas.destinos);
     try { pastaHandle = await idb("ler") || null; } catch (e) { pastaHandle = null; }
   }
   mostrarAvisoPasta();
+  desenharDrive();
+  if (driveAtivo()) prepararLoginGoogle().catch(() => {});
   if (typeof ExcelJS === "undefined") mostrar("Sem internet: a geração do Excel não carregou. Os lançamentos continuam sendo salvos.", "err");
 })();

@@ -66,8 +66,8 @@ function abaResumo(wb, db, mes, logoId) {
 function abaMovimentos(wb, db, titulo, movs) {
   const ws = wb.addWorksheet(titulo, { views: [{ state: "frozen", ySplit: 1 }] });
   const cab = ["Data", "Tipo", "Nº", "Descrição do EPI", "C.A", "Quantidade",
-    "Retirado por / Fornecedor", "Destino (para onde)", "Responsável", "Mês", "Observação"];
-  [12, 10, 6, 44, 12, 11, 26, 22, 20, 13, 30].forEach((w, i) => ws.getColumn(i + 1).width = w);
+    "Retirado por / Fornecedor", "Destino (para onde)", "Responsável", "Mês", "Observação", "Nº Nota Fiscal", "Anexo NF"];
+  [12, 10, 6, 44, 12, 11, 26, 22, 20, 13, 30, 14, 22].forEach((w, i) => ws.getColumn(i + 1).width = w);
   const r1 = ws.getRow(1);
   cab.forEach((txt, i) => {
     const c = r1.getCell(i + 1);
@@ -81,7 +81,8 @@ function abaMovimentos(wb, db, titulo, movs) {
     const it = itemPorId(db, m.item_id);
     const [a, me, d] = m.data.split("-").map(Number);
     const vals = [new Date(Date.UTC(a, me - 1, d)), m.tipo, m.item_id, it ? it.descricao : "?", m.ca || "",
-      m.quantidade, m.pessoa || "", m.destino || "", m.responsavel || "", nomeMesArq(m.data.slice(0, 7)), m.obs || ""];
+      m.quantidade, m.pessoa || "", m.destino || "", m.responsavel || "", nomeMesArq(m.data.slice(0, 7)), m.obs || "",
+      m.nf_numero || "", celulaNF(m)];
     const row = ws.getRow(2 + i);
     vals.forEach((v, j) => {
       const c = row.getCell(j + 1);
@@ -89,9 +90,61 @@ function abaMovimentos(wb, db, titulo, movs) {
       c.border = BORDA;
       if (j === 0) c.numFmt = "dd/mm/yyyy";
       if (j === 1) c.font = { bold: true, color: { argb: v === "Entrada" ? "FF1E7B34" : "FFB42318" } };
+      if (j === 12 && v && v.hyperlink) c.font = { color: { argb: "FF1F5FBF" }, underline: true };
     });
   });
-  if (movs.length) ws.autoFilter = `A1:K${movs.length + 1}`;
+  if (movs.length) ws.autoFilter = `A1:M${movs.length + 1}`;
+}
+
+// Link da nota fiscal: Drive (abre de qualquer lugar) ou arquivo na subpasta local Notas_Fiscais
+function linkNF(m) {
+  if (!m.nf) return null;
+  if (m.nf.drive_link) return m.nf.drive_link;
+  if (m.nf.arquivo_local) return "Notas_Fiscais/" + m.nf.arquivo_local;
+  return null;
+}
+
+function celulaNF(m) {
+  if (!m.nf) return "";
+  const link = linkNF(m);
+  return link ? { text: "📎 Abrir nota fiscal", hyperlink: link } : m.nf.nome;
+}
+
+// Aba com a imagem (1a pagina) de cada nota fiscal das compras do mes
+function abaNotas(wb, db, mes, anexos) {
+  const movs = db.movimentos.filter(m => m.nf && m.data.slice(0, 7) === mes)
+    .sort((a, b) => a.data.localeCompare(b.data) || a.id - b.id);
+  if (!movs.length) return;
+  const ws = wb.addWorksheet(`Notas Fiscais ${nomeMesArq(mes)}`, { pageSetup: { fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.getColumn(1).width = 110;
+  ws.getCell("A1").value = `NOTAS FISCAIS DE COMPRA – ${MESES_PT[+mes.slice(5) - 1]}/${mes.slice(0, 4)} – Obra: ${db.obra}`;
+  ws.getCell("A1").font = { bold: true, size: 14 };
+  let linha = 3;
+  for (const m of movs) {
+    const it = itemPorId(db, m.item_id);
+    const cab = ws.getCell(`A${linha}`);
+    cab.value = `NF ${m.nf_numero || "(sem número)"}  •  ${m.data.split("-").reverse().join("/")}  •  ` +
+      `${it ? it.descricao : "?"}  •  Qtd: ${m.quantidade}  •  Fornecedor: ${m.pessoa || "-"}`;
+    cab.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cab.fill = preenche("1E7B34");
+    cab.alignment = { wrapText: true, vertical: "middle" };
+    ws.getRow(linha).height = 32;
+    const link = linkNF(m);
+    const lc = ws.getCell(`A${linha + 1}`);
+    lc.value = link ? { text: `📎 Abrir arquivo original (${m.nf.nome})`, hyperlink: link } : `Arquivo: ${m.nf.nome}`;
+    if (link) lc.font = { color: { argb: "FF1F5FBF" }, underline: true };
+    linha += 2;
+    const a = anexos[m.id];
+    if (a && a.previa) {
+      const largura = 640, altura = Math.round(largura * a.altura / a.largura);
+      const img = wb.addImage({ buffer: a.previa, extension: "jpeg" });
+      ws.addImage(img, { tl: { col: 0, row: linha - 1 }, ext: { width: largura, height: altura } });
+      linha += Math.ceil(altura / 20) + 2;
+    } else {
+      ws.getCell(`A${linha}`).value = "(prévia indisponível – abra o arquivo original pelo link)";
+      linha += 2;
+    }
+  }
 }
 
 function base64ParaBytes(b64) {
@@ -100,7 +153,7 @@ function base64ParaBytes(b64) {
   return bytes;
 }
 
-async function montarPlanilha(db, mesFoco) {
+async function montarPlanilha(db, mesFoco, anexos = {}) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Controle de Estoque de EPI";
   const logoId = wb.addImage({ buffer: base64ParaBytes(LOGO_BASE64), extension: "png" });
@@ -109,6 +162,7 @@ async function montarPlanilha(db, mesFoco) {
   meses.add(hoje().slice(0, 7));
   abaResumo(wb, db, mesFoco, logoId);
   abaMovimentos(wb, db, `Mov ${nomeMesArq(mesFoco)}`, db.movimentos.filter(m => m.data.slice(0, 7) === mesFoco));
+  abaNotas(wb, db, mesFoco, anexos);
   [...meses].sort().reverse().filter(m => m !== mesFoco).forEach(m => abaResumo(wb, db, m, logoId));
   abaMovimentos(wb, db, "Todas Movimentacoes", db.movimentos);
   return new Blob([await wb.xlsx.writeBuffer()],
