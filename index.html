@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controle de Estoque de EPI</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <img class="logo" src="logo.png" alt="Oliveira Montagem">
+  <h1>Controle de Estoque de EPI<div class="obra" id="obra" title="Clique para alterar a obra"></div></h1>
+  <label>Mês do controle&nbsp; <input type="month" id="mes"></label>
+</header>
+<nav>
+  <button data-aba="lanc" class="ativo">Lançar entrada / saída</button>
+  <button data-aba="estoque">Estoque do mês</button>
+  <button data-aba="movs">Movimentações</button>
+  <button data-aba="itens">Cadastro de EPIs</button>
+  <button data-aba="config">Planilhas e backup</button>
+</nav>
+<main>
+  <div id="aviso-pasta" class="aviso-pasta"></div>
+  <div id="msg" class="msg"></div>
+
+  <!-- LANCAMENTO -->
+  <section class="aba ativa" id="aba-lanc">
+    <div class="card">
+      <h2>Novo lançamento</h2>
+      <div class="grid">
+        <div class="full">
+          <div class="tipo">
+            <label class="sai sel"><input type="radio" name="tipo" value="Saída" checked> ▼ SAÍDA (retirada)</label>
+            <label class="ent"><input type="radio" name="tipo" value="Entrada"> ▲ ENTRADA (compra / recebimento)</label>
+          </div>
+        </div>
+        <label class="campo full">Descrição do EPI
+          <input id="f-item" list="lista-itens" placeholder="Digite para buscar (ex.: luva, botina 42, PFF2...)" autocomplete="off">
+          <datalist id="lista-itens"></datalist>
+        </label>
+        <div class="full info" id="f-info">Selecione um EPI para ver o saldo.</div>
+        <label class="campo">C.A <input id="f-ca" placeholder="Nº do C.A"></label>
+        <label class="campo">Quantidade <input id="f-qtd" type="number" min="1" step="1" value="1"></label>
+        <label class="campo"><span id="lbl-data">Data de saída</span> <input id="f-data" type="date"></label>
+        <label class="campo"><span id="lbl-pessoa">Nome de quem retirou</span>
+          <input id="f-pessoa" list="lista-pessoas" autocomplete="off"><datalist id="lista-pessoas"></datalist>
+        </label>
+        <label class="campo"><span id="lbl-destino">Para onde (destino)</span>
+          <input id="f-destino" list="lista-destinos" autocomplete="off" placeholder="Ex.: Obra, setor, SP..."><datalist id="lista-destinos"></datalist>
+        </label>
+        <label class="campo">Responsável
+          <input id="f-resp" list="lista-resp" autocomplete="off"><datalist id="lista-resp"></datalist>
+        </label>
+        <label class="campo full">Observação <input id="f-obs" placeholder="Opcional"></label>
+        <label class="full sub" id="lin-ca" style="display:none"><input type="checkbox" id="f-atualiza-ca" style="width:auto"> Atualizar o C.A cadastrado deste EPI para o novo número</label>
+      </div>
+      <div class="acoes">
+        <button class="btn grande" id="btn-salvar">💾 Salvar</button>
+        <button id="btn-limpar">Limpar</button>
+        <span class="sub">Ao salvar, a planilha do mês é atualizada (um arquivo novo só é criado quando muda o mês).</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Últimos lançamentos</h2>
+      <div class="tabela"><table id="t-ultimos"></table></div>
+    </div>
+  </section>
+
+  <!-- ESTOQUE -->
+  <section class="aba" id="aba-estoque">
+    <div class="kpis" id="kpis"></div>
+    <div class="card">
+      <div class="barra">
+        <h2 style="margin:0;flex:1" id="tit-estoque"></h2>
+        <input id="busca-est" placeholder="Filtrar EPI...">
+        <button class="btn" id="btn-exportar">Gerar Excel agora</button>
+      </div>
+      <div class="tabela"><table id="t-estoque"></table></div>
+      <p class="sub">Linhas em vermelho: saldo zerado ou negativo.</p>
+    </div>
+  </section>
+
+  <!-- MOVIMENTACOES -->
+  <section class="aba" id="aba-movs">
+    <div class="card">
+      <div class="barra">
+        <h2 style="margin:0;flex:1" id="tit-movs"></h2>
+        <input id="busca-mov" placeholder="Filtrar por EPI, pessoa, destino...">
+      </div>
+      <div class="tabela"><table id="t-movs"></table></div>
+    </div>
+  </section>
+
+  <!-- ITENS -->
+  <section class="aba" id="aba-itens">
+    <div class="card">
+      <h2 id="tit-item">Cadastrar novo EPI</h2>
+      <div class="grid">
+        <input type="hidden" id="i-id">
+        <label class="campo" style="grid-column: span 2">Descrição do EPI <input id="i-desc"></label>
+        <label class="campo">C.A <input id="i-ca"></label>
+        <label class="campo">Estoque inicial (base) <input id="i-base" type="number" step="1" value="0"></label>
+      </div>
+      <div class="acoes">
+        <button class="btn" id="btn-item">💾 Salvar EPI</button>
+        <button id="btn-item-cancelar">Cancelar</button>
+        <span class="sub">"Estoque inicial" é a quantidade que existia antes do primeiro lançamento (importado do saldo de Setembro/26).</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="barra"><h2 style="margin:0;flex:1">EPIs cadastrados</h2><input id="busca-item" placeholder="Filtrar..."></div>
+      <div class="tabela"><table id="t-itens"></table></div>
+    </div>
+  </section>
+
+  <!-- CONFIG -->
+  <section class="aba" id="aba-config">
+    <div class="card">
+      <h2>Pasta das planilhas Excel</h2>
+      <p class="sub">No Chrome ou Edge do computador, escolha uma pasta uma única vez. A cada salvamento o sistema atualiza
+        <b>Controle_EPI_&lt;Mês&gt;.xlsx</b> e <b>CONTROLE_ESTOQUE_EPI.xlsx</b> dentro dela. Um arquivo novo só é criado quando o mês muda.
+        Em outros navegadores (ou no celular), a planilha do mês é baixada a cada salvamento.</p>
+      <div class="acoes">
+        <button class="btn" id="btn-pasta">📁 Escolher pasta</button>
+        <span class="sub" id="pasta-atual"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Backup dos dados</h2>
+      <p class="sub">Os lançamentos ficam guardados neste navegador, neste computador. Faça backup com frequência e use
+        "Restaurar" para levar os dados para outro computador. Limpar os dados do navegador apaga os lançamentos.</p>
+      <div class="acoes">
+        <button class="btn" id="btn-backup">⬇ Baixar backup</button>
+        <button id="btn-restaurar">⬆ Restaurar backup</button>
+        <input type="file" id="arq-restaurar" accept=".json,application/json" style="display:none">
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="dados_iniciais.js"></script>
+<script src="logo.js"></script>
+<script src="excel.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
